@@ -22,6 +22,15 @@ import parser_Rigla
 import parser_Gorzdrav
 import extractor
 
+# 4. Загрузка данных
+try:
+    # Это сработает в GitHub Actions (файл .py)
+    PROJECT_DIR = Path(__file__).resolve().parent
+except NameError:
+    # Это сработает в ноутбуке
+    PROJECT_DIR = Path.cwd()
+sys.path.insert(0, str(PROJECT_DIR))
+
 df_in = pd.read_excel(PROJECT_DIR / "drugs.xlsx", header=None)
 drugs = df_in[0].dropna().astype(str).str.strip().tolist()
 DRUGS_TEST = drugs[:100] #тестовый срез

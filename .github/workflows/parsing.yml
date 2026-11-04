@@ -1,0 +1,25 @@
+name: Pharmacy Parsing
+
+on:
+  schedule:
+    # Запуск каждый день в 06:00 UTC (09:00 по Москве)
+    - cron: '0 6 * * *'
+  workflow_dispatch: # Позволяет запускать вручную кнопкой в GitHub
+
+jobs:
+  run-parser:
+    runs-on: ubuntu-latest # GitHub предоставляет бесплатную Linux-машину
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12' # Можно поставить '3.11', '3.10' и т.д.
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run parser script
+        run: python run_all.py

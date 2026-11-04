@@ -8,18 +8,15 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
 
+try:
+    PROJECT_DIR = Path(__file__).resolve().parent
+except NameError:
+    PROJECT_DIR = Path.cwd()
+sys.path.insert(0, str(PROJECT_DIR))
+
 import parser_Rigla
 import parser_Gorzdrav
 import extractor
-#import parser_Stolichki
-
-try:
-    # Это сработает в GitHub Actions (файл .py)
-    PROJECT_DIR = Path(__file__).resolve().parent
-except NameError:
-    # Это сработает в ноутбуке
-    PROJECT_DIR = Path.cwd()
-sys.path.insert(0, str(PROJECT_DIR))
 
 df_in = pd.read_excel(PROJECT_DIR / "drugs.xlsx", header=None)
 drugs = df_in[0].dropna().astype(str).str.strip().tolist()

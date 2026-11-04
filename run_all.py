@@ -1,5 +1,14 @@
 import sys
+import os
 from pathlib import Path
+
+# 1. Добавляем текущую рабочую директорию в sys.path
+# Именно оттуда GitHub Actions запускает скрипт
+sys.path.insert(0, os.getcwd())
+# И на всякий случай папку самого скрипта
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# 2. Теперь импортируем всё остальное
 import pandas as pd
 import re
 import json
@@ -8,12 +17,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
 
-try:
-    PROJECT_DIR = Path(__file__).resolve().parent
-except NameError:
-    PROJECT_DIR = Path.cwd()
-sys.path.insert(0, str(PROJECT_DIR))
-
+# 3. Импортируем локальные модули
 import parser_Rigla
 import parser_Gorzdrav
 import extractor

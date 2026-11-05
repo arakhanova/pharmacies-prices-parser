@@ -1,6 +1,8 @@
 import sys
 import os
 from pathlib import Path
+from datetime import date
+from sqlalchemy import create_engine, text
 
 # 1. Добавляем текущую рабочую директорию в sys.path
 # Именно оттуда GitHub Actions запускает скрипт
@@ -139,7 +141,7 @@ def normalize_pharmacy_data(df, pharmacy_name):
     Возвращает новый DataFrame, ничего не сохраняет.
     """
     if df is None or df.empty:
-        print(f"⚠️ Данные для '{pharmacy_name}' пусты.")
+        print(f"Данные для '{pharmacy_name}' пусты.")
         return pd.DataFrame(columns=UNIFIED_COLS)
 
     # 1. Переименовываем колонки по схеме
@@ -172,7 +174,7 @@ def save_pharmacy_data(df, pharmacy_name, output_dir, format="parquet"):
     format: "parquet" или "pickle"
     """
     if df is None or df.empty:
-        print(f"⚠️ Нечего сохранять для '{pharmacy_name}'.")
+        print(f"Нечего сохранять для '{pharmacy_name}'.")
         return None
 
     output_dir = Path(output_dir)
@@ -210,7 +212,7 @@ def build_pharmacy_summary(df, pharmacy_name, drugs_list):
     ].copy()
     
     if pharmacy_raw.empty:
-        print(f"⚠️ Для аптеки '{pharmacy_name}' не найдено данных в long_raw")
+        print(f"Для аптеки '{pharmacy_name}' не найдено данных в long_raw")
         return pd.DataFrame({
             "Исходное наим товара": drugs_list,
             f"Товар {pharmacy_name.capitalize()}": None,
@@ -275,7 +277,7 @@ def build_pharmacy_summary(df, pharmacy_name, drugs_list):
     ]
 
     return matched_data
-
+    
 results = run_in_chunks(tasks, DRUGS_TEST, chunk_size=200, max_workers=3)
 data_Gorzdrav  = results.get("gorzdrav")
 data_Rigla     = results.get("rigla")
@@ -286,3 +288,55 @@ normalized_data_Gorzdrav = normalize_pharmacy_data(data_Gorzdrav,"gorzdrav")
 
 matched_Rigla = build_pharmacy_summary(normalized_data_Rigla, "rigla", DRUGS_TEST)
 matched_Gorzdrav = build_pharmacy_summary(normalized_data_Gorzdrav, "gorzdrav", DRUGS_TEST)
+
+DB_URL = os.environ.get("DB_URL")
+if DB_URL:
+    print("Подключение к базе данных...")
+    engine = create_engine(DB_URL)
+    today = date.today()
+    
+    # Функция для сохранения любой таблицы (чтобы не дублировать код)
+    def save_to_db(df, table_name, value_cols):
+        if df.empty:
+            return
+            
+        df_export = df.copy()
+        df_export["date"] = today
+        
+        # Формируем часть SQL-запроса для обновления (ON CONFLICT)
+        update_set = ", ".join([f'"{col}" = EXCLUDED."{col}"' for col in value_cols])
+        
+        with engine.begin() as conn:
+            # Временная таблица
+            df_export.to_sql("temp_table", conn, if_exists="replace", index=False)
+            
+            # Основной запрос UPSERT
+            upsert_query = text(f"""
+                INSERT INTO {table_name} (date, "Исходное наим товара", {", ".join([f'"{c}"' for c in value_cols])})
+                SELECT date, "Исходное наим товара", {", ".join([f'"{c}"' for c in value_cols])}
+                FROM temp_table
+                ON CONFLICT (date, "Исходное наим товара") 
+                DO UPDATE SET {update_set};
+            """)
+            
+            conn.execute(upsert_query)
+            conn.execute(text("DROP TABLE temp_table;"))
+
+    # 1. Сохраняем Риглу
+    save_to_db(
+        matched_Rigla, 
+        "price_rigla", 
+        value_cols=["Товар Ригла", "Цена Ригла", "Ссылка Ригла"]
+    )
+    print("Ригла записана в базу.")
+
+    # 2. Сохраняем Горздрав
+    save_to_db(
+        matched_Gorzdrav, 
+        "price_gorzdrav", 
+        value_cols=["Товар Горздрав", "Цена Горздрав", "Ссылка Горздрав"]
+    )
+    print("Горздрав записан в базу.")
+
+else:
+    print("Переменная DB_URL не найдена.")

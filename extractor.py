@@ -19,6 +19,16 @@ import pandas as pd
 # ===========================================================================
 
 FORMS = {
+    "листья": "foliage",
+    "лист": "foliage",
+    "почки": "buds",
+    "плоды": "fruits",
+    "цветки": "flowers",
+    "цветы": "flowers",
+    "трава": "herb",
+    "кора": "bark",
+    "сок": "juice",
+    "эмульсия": "emulsion",
     "корневища": "rhizomes",
     "корневище": "rhizomes",
     "корни": "rhizomes",
@@ -75,11 +85,20 @@ PACK_UNITS = ["шт", "таб", "капс", "амп", "доз", "фл", "пак"
 
 ALLOWED_FORMS = {
     "tab", "caps", "solution", "spray", "cream", "ointment", "drops",
-    "supp", "syrup", "powder", "gel", "patch", "dragee", "herbal",
-    "tincture", "extract", "other","ampoules","rhizomes",
-    "juice"
+    "supp", "syrup", "powder", "gel", "patch", "dragee", "tincture", 
+    "extract", "other", "ampoules","juice",
+    
+    # Новые формы
+    "rhizomes",
+    "foliage",
+    "buds",
+    "fruits",
+    "flowers",
+    "herb",
+    "bark",
+    "juice",
+    "emulsion",
 }
-
 # ===========================================================================
 # Regex-экстрактор
 # ===========================================================================
@@ -143,10 +162,18 @@ def extract_regex(name: str) -> Optional[dict]:
         dose_unit = m.group(2).lower()
 
     pack_count, pack_unit = None, None
-    m = _PACK_RE.search(s)
-    if m:
-        pack_count = int(m.group(1) or m.group(2))
+    
+    # 1. Сначала ищем формат "№21х3" (умножение)
+    m_mult = re.search(r"(?:№|N|n)\s*(\d+)\s*[хxX*]\s*(\d+)", s)
+    if m_mult:
+        pack_count = int(m_mult.group(1)) * int(m_mult.group(2))
         pack_unit = "шт"
+    else:
+        # 2. Если умножения нет, ищем обычную упаковку
+        m = _PACK_RE.search(s)
+        if m:
+            pack_count = int(m.group(1) or m.group(2))
+            pack_unit = "шт"
 
     # Ищем ВСЕ совпадения "мл" и берем ПОСЛЕДНЕЕ (объем ампулы, а не концентрацию)
     volume_ml = None

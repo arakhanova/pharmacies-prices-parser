@@ -115,7 +115,7 @@ _PACK_RE = re.compile(
 )
 
 # Ищем число + мл, но НЕ если перед мл стоит /
-_VOLUME_RE = re.compile(r"(\d+[.,]?\d*)\s*мл(?!\s*/)", re.IGNORECASE)
+_VOLUME_RE = re.compile(r"(\d+[.,]?\d*)\s*(мл|г)(?!\s*/)", re.IGNORECASE)
 _COMBINATION_RE = re.compile(r"\d+\s*(?:мг|мкг|г)\s*\+\s*\d+")
 
 def _normalize_text(s: str) -> str:

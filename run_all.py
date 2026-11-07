@@ -192,19 +192,8 @@ def save_pharmacy_data(df, pharmacy_name, output_dir, format="parquet"):
     print(f"✅ {pharmacy_name}: {len(df)} строк сохранено в {output_path.name}")
     return output_path
 
+
 def build_pharmacy_summary(df, pharmacy_name, drugs_list):
-    """
-    Строит сводную таблицу для одной аптеки.
-    
-    Параметры:
-    - df: общий DataFrame со всеми спарсенными данными
-    - pharmacy_name: строка, название аптеки (например, "gorzdrav" или "rigla")
-    - drugs_list: список исходных названий (например, DRUGS_TEST)
-    
-    Возвращает:
-    - DataFrame с колонками: Исходное наим товара, Товар {Аптека}, Цена {Аптека}, Ссылка {Аптека}
-    """
-    
     # 1. Фильтруем данные по аптеке
     pharmacy_raw = df[
         (df["pharmacy"] == pharmacy_name) & 
@@ -212,7 +201,7 @@ def build_pharmacy_summary(df, pharmacy_name, drugs_list):
     ].copy()
     
     if pharmacy_raw.empty:
-        print(f"Для аптеки '{pharmacy_name}' не найдено данных в long_raw")
+        print(f"Для аптеки '{pharmacy_name}' не найдено данных")
         return pd.DataFrame({
             "Исходное наим товара": drugs_list,
             f"Товар {pharmacy_name.capitalize()}": None,
@@ -221,6 +210,7 @@ def build_pharmacy_summary(df, pharmacy_name, drugs_list):
         })
 
     # 2. Извлекаем match_key из выдачи парсера
+    print(f"[{pharmacy_name.capitalize()}] Извлекаем match_key из выдачи...")
     pharmacy_raw["parsed_match_key"] = pharmacy_raw["name"].apply(
         lambda x: extractor.build_match_key(extractor.normalize_entity(extractor.extract_regex(x))) 
         if extractor.extract_regex(x) else None
@@ -237,7 +227,8 @@ def build_pharmacy_summary(df, pharmacy_name, drugs_list):
         
     drugs_df["target_match_key"] = drugs_df["Исходное наим товара"].apply(get_target_key)
 
-    # 4. Сливаем: строгое совпадение по query и match_key
+    # 4. Сначала пробуем СТРОГОЕ совпадение
+    print(f"[{pharmacy_name.capitalize()}] Ищем строгие совпадения...")
     matched = pd.merge(
         drugs_df,
         pharmacy_raw,
@@ -246,7 +237,56 @@ def build_pharmacy_summary(df, pharmacy_name, drugs_list):
         how="left"
     )
 
-    # 5. Агрегация (берем минимальную цену, если есть дубли)
+    # =========================================================================
+    # СПАСЕНИЕ ДЛЯ СЛОЖНЫХ СЛУЧАЕВ (Азитромицин-Вертекс, Азопт и т.д.)
+    # =========================================================================
+    missing_mask = matched["name"].isna()
+    
+    if missing_mask.any():
+        print(f"[{pharmacy_name.capitalize()}] Спасаем {missing_mask.sum()} записей по бренду и производителю...")
+        
+        def rescue_by_manufacturer(row):
+            query_name = str(row["Исходное наим товара"]).lower()
+            
+            # Берем первое слово из запроса (Азитромицин)
+            brand_word = re.sub(r"[^а-яa-z]", "", query_name.split()[0])
+            
+            # Ищем в аптеке товары, где в названии есть бренд
+            candidates = pharmacy_raw[
+                pharmacy_raw["name"].str.lower().str.contains(brand_word, na=False)
+            ]
+            
+            if candidates.empty:
+                return pd.Series({"name": None, "price": None, "url": None})
+            
+            # Фильтруем по производителю!
+            # Ищем товары, где в колонке manufacturer есть слова из запроса (например, "вертекс")
+            target_mfg = candidates[
+                candidates["manufacturer"].astype(str).str.lower().apply(
+                    lambda m: any(word in m for word in query_name.split() if len(word) > 3)
+                )
+            ]
+            
+            # Если нашли по производителю — берем. Если нет — просто самый дешевый.
+            best_candidates = target_mfg if not target_mfg.empty else candidates
+            best = best_candidates.sort_values("price").iloc[0]
+            
+            return pd.Series({
+                "name": best["name"],
+                "price": best["price"],
+                "url": best["url"]
+            })
+
+        # Применяем спасение
+        rescued = matched[missing_mask].apply(rescue_by_manufacturer, axis=1)
+        
+        # Записываем спасенные данные обратно
+        matched.loc[missing_mask, "name"] = rescued["name"].values
+        matched.loc[missing_mask, "price"] = rescued["price"].values
+        matched.loc[missing_mask, "url"] = rescued["url"].values
+    # =========================================================================
+
+    # 5. Агрегация (берем минимальную цену)
     matched_data = (
         matched
         .sort_values("price")
@@ -259,7 +299,7 @@ def build_pharmacy_summary(df, pharmacy_name, drugs_list):
         .reset_index()
     )
 
-    # 6. Привязка к исходному порядку (чтобы было ровно N строк)
+    # 6. Привязка к исходному порядку
     matched_data = pd.merge(
         pd.DataFrame({"Исходное наим товара": drugs_list}),
         matched_data,

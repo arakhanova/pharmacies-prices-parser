@@ -19,6 +19,9 @@ import pandas as pd
 # ===========================================================================
 
 FORMS = {
+    "амп.": "ampoules",
+    "ампулы": "ampoules",
+    "амп": "ampoules",
     "фл.-кап.": "drops",
     "фл.-кап": "drops",
     "фл. кап.": "drops",
@@ -68,7 +71,7 @@ PACK_UNITS = ["шт", "таб", "капс", "амп", "доз", "фл", "пак"
 ALLOWED_FORMS = {
     "tab", "caps", "solution", "spray", "cream", "ointment", "drops",
     "supp", "syrup", "powder", "gel", "patch", "dragee", "herbal",
-    "tincture", "extract", "other",
+    "tincture", "extract", "other","ampoules",
 }
 
 # ===========================================================================
@@ -76,16 +79,19 @@ ALLOWED_FORMS = {
 # ===========================================================================
 
 _DOSE_RE = re.compile(
-    r"(\d+[.,]?\d*)\s*(" + "|".join(re.escape(u) for u in DOSE_UNITS) + r")",
+    r"(\d+[.,]?\d*)\s*(мг/мл|мкг/мл|мг/доза|мкг/доза|ме/мл|ме/доза|мкг|мг|г|мл|ме|iu|%)",
     re.IGNORECASE,
 )
-_PACK_RE = re.compile(
-    r"(?:№|N|n)\s*(\d+)|(\d+)\s*(?:шт|таб|капс|амп|доз|фл|пак|саше)\b",
-    re.IGNORECASE,
-)
-_VOLUME_RE = re.compile(r"(\d+[.,]?\d*)\s*мл\b", re.IGNORECASE)
-_COMBINATION_RE = re.compile(r"\d+\s*(?:мг|мкг|г)\s*\+\s*\d+")
 
+# Убрали "амп" из списка единиц фасовки!
+_PACK_RE = re.compile(
+    r"(?:№|N|n)\s*(\d+)|(\d+)\s*(?:шт|таб|капс|доз|фл|пак|саше)\b",
+    re.IGNORECASE,
+)
+
+# Ищем число + мл, но НЕ если перед мл стоит /
+_VOLUME_RE = re.compile(r"(\d+[.,]?\d*)\s*мл(?!\s*/)", re.IGNORECASE)
+_COMBINATION_RE = re.compile(r"\d+\s*(?:мг|мкг|г)\s*\+\s*\d+")
 
 def _normalize_text(s: str) -> str:
     if not isinstance(s, str):
@@ -136,10 +142,11 @@ def extract_regex(name: str) -> Optional[dict]:
         pack_count = int(m.group(1) or m.group(2))
         pack_unit = "шт"
 
+    # Ищем ВСЕ совпадения "мл" и берем ПОСЛЕДНЕЕ (объем ампулы, а не концентрацию)
     volume_ml = None
-    m = _VOLUME_RE.search(s)
-    if m:
-        volume_ml = _parse_float(m.group(1))
+    volumes = _VOLUME_RE.findall(s)
+    if volumes:
+        volume_ml = _parse_float(volumes[-1])
 
     name_lower = name.lower().replace("ё", "е")
     form_raw_lower = form_raw.lower().replace("ё", "е")

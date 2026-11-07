@@ -320,7 +320,7 @@ def build_pharmacy_summary(df, pharmacy_name, drugs_list):
 
     return matched_data
     
-results = run_in_chunks(tasks, DRUGS_TEST, chunk_size=200, max_workers=3)
+results = run_in_chunks(tasks, drugs, chunk_size=200, max_workers=3)
 data_Gorzdrav  = results.get("gorzdrav")
 data_Rigla     = results.get("rigla")
 #data_Stolichki = results.get("stolichki")
@@ -328,8 +328,8 @@ data_Rigla     = results.get("rigla")
 normalized_data_Rigla = normalize_pharmacy_data(data_Rigla,"rigla")
 normalized_data_Gorzdrav = normalize_pharmacy_data(data_Gorzdrav,"gorzdrav")
 
-matched_Rigla = build_pharmacy_summary(normalized_data_Rigla, "rigla", DRUGS_TEST)
-matched_Gorzdrav = build_pharmacy_summary(normalized_data_Gorzdrav, "gorzdrav", DRUGS_TEST)
+matched_Rigla = build_pharmacy_summary(normalized_data_Rigla, "rigla", drugs)
+matched_Gorzdrav = build_pharmacy_summary(normalized_data_Gorzdrav, "gorzdrav", drugs)
 
 DB_URL = os.environ.get("DB_URL")
 if DB_URL:

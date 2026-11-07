@@ -164,14 +164,31 @@ def build_pharmacy_summary(df, pharmacy_name, drugs_list):
     drugs_df["t_pack"] = target_ents.apply(lambda x: x["pack"])
     drugs_df["t_volume"] = target_ents.apply(lambda x: x["volume"])
 
-    # 3. Сливаем по бренду
-    merged = pd.merge(
-        drugs_df, 
-        pharmacy_raw, 
-        left_on="t_brand", 
-        right_on="p_brand", 
-        how="inner"
-    )
+    # 3. Сливаем по бренду (ТОЛЬКО если бренд распознан!)
+    drugs_df_valid = drugs_df.dropna(subset=["t_brand"])
+    pharmacy_raw_valid = pharmacy_raw.dropna(subset=["p_brand"])
+
+    if drugs_df_valid.empty or pharmacy_raw_valid.empty:
+        merged = pd.DataFrame()
+    else:
+        merged = pd.merge(
+            drugs_df_valid, 
+            pharmacy_raw_valid, 
+            left_on="t_brand", 
+            right_on="p_brand", 
+            how="inner"
+        )
+
+    # Если после merge ничего не осталось — возвращаем пустую таблицу
+    if merged.empty:
+        final_table = pd.DataFrame({
+            "Исходное наим товара": drugs_list,
+            "name": None,
+            "price": None,
+            "url": None
+        })
+        print(f"✅ [{pharmacy_name.capitalize()}] Найдено: 0 из {len(drugs_list)} (0.0%)")
+        return final_table
 
     # 4. Строгая фильтрация по всем полям
     form_mask = (merged["t_form"].isna()) | (merged["t_form"] == merged["p_form"])

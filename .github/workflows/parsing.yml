@@ -8,7 +8,7 @@ on:
 
 jobs:
   run-parser:
-    runs-on: ubuntu-latest # GitHub предоставляет бесплатную Linux-машину
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -16,10 +16,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12' # Можно поставить '3.11', '3.10' и т.д.
+          python-version: '3.12'
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
       - name: Run parser script
+        env:
+          DB_URL: ${{ secrets.DB_URL }}  # <--- ПЕРЕДАЕТ СЕКРЕТ
         run: python run_all.py

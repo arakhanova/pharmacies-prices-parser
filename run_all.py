@@ -192,9 +192,15 @@ def build_pharmacy_summary(df, pharmacy_name, drugs_list):
 
     # 4. Строгая фильтрация по всем полям
     form_mask = (merged["t_form"].isna()) | (merged["t_form"] == merged["p_form"])
-    dose_mask = (merged["t_dose"].isna()) | (merged["t_dose"] == merged["p_dose"])
+    dose_mask = (
+        (merged["t_dose"].notna() & merged["p_dose"].notna() & (merged["t_dose"] == merged["p_dose"])) |
+        (merged["t_dose"].isna() & merged["p_dose"].isna())
+    )
     pack_mask = (merged["t_pack"].isna()) | (merged["t_pack"] == merged["p_pack"])
-    vol_mask = (merged["t_volume"].isna()) | (merged["t_volume"] == merged["p_volume"])
+    vol_mask = (
+        (merged["t_volume"].notna() & merged["p_volume"].notna() & (merged["t_volume"] == merged["p_volume"])) |
+        (merged["t_volume"].isna() & merged["p_volume"].isna())
+    )
 
     strict_matches = merged[form_mask & dose_mask & pack_mask & vol_mask].copy()
 

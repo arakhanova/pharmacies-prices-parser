@@ -295,47 +295,42 @@ if DB_URL:
     engine = create_engine(DB_URL)
     today = date.today()
     
-    # Функция для сохранения любой таблицы (чтобы не дублировать код)
-    def save_to_db(df, table_name, value_cols):
+    def save_to_db(df, table_name):
         if df.empty:
             return
             
-        df_export = df.copy()
-        df_export["date"] = today
+        # Переименовываем колонки DataFrame под новые имена в базе
+        df_export = pd.DataFrame({
+            "date": today,
+            "query": df["Исходное наим товара"],
+            "product_name": df.iloc[:, 1],  # Вторая колонка (Товар Ригла/Горздрав)
+            "price": df.iloc[:, 2],         # Третья колонка (Цена)
+            "url": df.iloc[:, 3]            # Четвертая колонка (Ссылка)
+        })
         
-        # Формируем часть SQL-запроса для обновления (ON CONFLICT)
-        update_set = ", ".join([f'"{col}" = EXCLUDED."{col}"' for col in value_cols])
+        # Теперь UPSERT становится элементарным
+        upsert_query = text(f"""
+            INSERT INTO {table_name} (date, query, product_name, price, url)
+            SELECT date, query, product_name, price, url
+            FROM temp_table
+            ON CONFLICT (date, query) 
+            DO UPDATE SET 
+                product_name = EXCLUDED.product_name,
+                price = EXCLUDED.price,
+                url = EXCLUDED.url;
+        """)
         
         with engine.begin() as conn:
-            # Временная таблица
             df_export.to_sql("temp_table", conn, if_exists="replace", index=False)
-            
-            # Основной запрос UPSERT
-            upsert_query = text(f"""
-                INSERT INTO {table_name} (date, "Исходное наим товара", {", ".join([f'"{c}"' for c in value_cols])})
-                SELECT date, "Исходное наим товара", {", ".join([f'"{c}"' for c in value_cols])}
-                FROM temp_table
-                ON CONFLICT (date, "Исходное наим товара") 
-                DO UPDATE SET {update_set};
-            """)
-            
             conn.execute(upsert_query)
             conn.execute(text("DROP TABLE temp_table;"))
 
     # 1. Сохраняем Риглу
-    save_to_db(
-        matched_Rigla, 
-        "price_rigla", 
-        value_cols=["Товар Ригла", "Цена Ригла", "Ссылка Ригла"]
-    )
+    save_to_db(matched_Rigla, "price_rigla")
     print("Ригла записана в базу.")
 
     # 2. Сохраняем Горздрав
-    save_to_db(
-        matched_Gorzdrav, 
-        "price_gorzdrav", 
-        value_cols=["Товар Горздрав", "Цена Горздрав", "Ссылка Горздрав"]
-    )
+    save_to_db(matched_Gorzdrav, "price_gorzdrav")
     print("Горздрав записан в базу.")
 
 else:

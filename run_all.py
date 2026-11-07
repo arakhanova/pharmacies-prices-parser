@@ -24,7 +24,7 @@ except NameError:
     PROJECT_DIR = Path.cwd()
 
 df_in = pd.read_excel(PROJECT_DIR / "drugs.xlsx", header=None)
-drugs = df_in[0].dropna().astype(str).str.strip().tolist()[250:351]
+drugs = df_in[0].dropna().astype(str).str.strip().tolist()[:500]
 
 # ==========================================
 # Парсинг

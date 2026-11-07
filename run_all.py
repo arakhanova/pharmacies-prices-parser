@@ -248,10 +248,15 @@ def build_pharmacy_summary(df, pharmacy_name, drugs_list):
         def rescue_by_manufacturer(row):
             query_name = str(row["Исходное наим товара"]).lower()
             
-            # Берем первое слово из запроса (Азитромицин)
-            brand_word = re.sub(r"[^а-яa-z]", "", query_name.split()[0])
+            # Берем первое слово из запроса (арпефлю)
+            brand_word = query_name.split()[0]
+            # Убираем всё, кроме букв (если есть дефисы или точки)
+            brand_word = re.sub(r"[^а-яa-z]", "", brand_word)
             
-            # Ищем в аптеке товары, где в названии есть бренд
+            if not brand_word:
+                return pd.Series({"name": None, "price": None, "url": None})
+            
+            # Ищем в аптеке все товары, где в названии есть этот бренд
             candidates = pharmacy_raw[
                 pharmacy_raw["name"].str.lower().str.contains(brand_word, na=False)
             ]
@@ -259,20 +264,8 @@ def build_pharmacy_summary(df, pharmacy_name, drugs_list):
             if candidates.empty:
                 return pd.Series({"name": None, "price": None, "url": None})
             
-            # Фильтруем по производителю!
-            # Ищем товары, где в колонке manufacturer есть слова из запроса (например, "вертекс")
-            mfg_series = candidates["manufacturer"].fillna("").astype(str).str.lower()
-            
-            target_mfg = candidates[
-                mfg_series.apply(
-                    lambda m: any(word in m for word in query_name.split() if len(word) > 3)
-                )
-            ]
-            
-            # Если нашли по производителю — берем. Если нет — просто самый дешевый.
-            best_candidates = target_mfg if not target_mfg.empty else candidates
-            best = best_candidates.sort_values("price").iloc[0]
-            
+            # Берем самый дешевый из найденных
+            best = candidates.sort_values("price").iloc[0]
             return pd.Series({
                 "name": best["name"],
                 "price": best["price"],

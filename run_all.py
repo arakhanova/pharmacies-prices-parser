@@ -349,6 +349,8 @@ if DB_URL:
             "price": df.iloc[:, 2],         # Третья колонка (Цена)
             "url": df.iloc[:, 3]            # Четвертая колонка (Ссылка)
         })
+        # УБИРАЕМ ДУБЛИКАТЫ ПЕРЕД ВСТАВКОЙ
+        df_export = df_export.drop_duplicates(subset=["date", "query"], keep="first")
         
         # Теперь UPSERT становится элементарным
         upsert_query = text(f"""

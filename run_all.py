@@ -261,8 +261,10 @@ def build_pharmacy_summary(df, pharmacy_name, drugs_list):
             
             # Фильтруем по производителю!
             # Ищем товары, где в колонке manufacturer есть слова из запроса (например, "вертекс")
+            mfg_series = candidates["manufacturer"].fillna("").astype(str).str.lower()
+            
             target_mfg = candidates[
-                candidates["manufacturer"].astype(str).str.lower().apply(
+                mfg_series.apply(
                     lambda m: any(word in m for word in query_name.split() if len(word) > 3)
                 )
             ]

@@ -24,7 +24,7 @@ except NameError:
     PROJECT_DIR = Path.cwd()
 
 df_in = pd.read_excel(PROJECT_DIR / "drugs.xlsx", header=None)
-drugs = df_in[0].dropna().astype(str).str.strip().tolist()
+drugs = df_in[0].dropna().astype(str).str.strip().tolist()[:100]
 
 # ==========================================
 # Парсинг
@@ -241,6 +241,11 @@ if DB_URL:
         if df.empty:
             return
             
+        # --- ЗАЩИТА ---
+        ALLOWED_TABLES = {"price_rigla", "price_gorzdrav"}
+        if table_name not in ALLOWED_TABLES:
+            raise ValueError(f"Недопустимая таблица: {table_name}")
+        
         df_export = pd.DataFrame({
             "date": today,
             "query": df["Исходное наим товара"],

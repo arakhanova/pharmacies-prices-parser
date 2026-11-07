@@ -3,47 +3,33 @@ import os
 from pathlib import Path
 from datetime import date
 from sqlalchemy import create_engine, text
-
-# 1. Добавляем текущую рабочую директорию в sys.path
-# Именно оттуда GitHub Actions запускает скрипт
-sys.path.insert(0, os.getcwd())
-# И на всякий случай папку самого скрипта
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-# 2. Теперь импортируем всё остальное
 import pandas as pd
 import re
-import json
-import hashlib
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from openai import OpenAI
 
-# 3. Импортируем локальные модули
+# 1. Настройка путей (работает и локально, и в GitHub Actions)
+sys.path.insert(0, os.getcwd())
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# 2. Импорт локальных модулей
 import parser_Rigla
 import parser_Gorzdrav
 import extractor
 
-# 4. Загрузка данных
+# 3. Загрузка исходного списка
 try:
-    # Это сработает в GitHub Actions (файл .py)
     PROJECT_DIR = Path(__file__).resolve().parent
 except NameError:
-    # Это сработает в ноутбуке
     PROJECT_DIR = Path.cwd()
-sys.path.insert(0, str(PROJECT_DIR))
 
 df_in = pd.read_excel(PROJECT_DIR / "drugs.xlsx", header=None)
 drugs = df_in[0].dropna().astype(str).str.strip().tolist()
-DRUGS_TEST = drugs[:100] #тестовый срез
 
+# ==========================================
+# Вспомогательные функции парсинга
+# ==========================================
 def run_in_chunks(tasks, drug_list, chunk_size=200, max_workers=3):
-    """
-    tasks: dict {name: (module, drug_list)}
-    Возвращает: dict {name: pd.DataFrame} — объединённые результаты по всем чанкам.
-    """
-    # 1. Разбиваем каждый список на чанки
-    #    (все аптеки получают одинаковые чанки, чтобы прогресс был синхронный)
     all_drugs = None
     for name, (module, drug_list) in tasks.items():
         all_drugs = drug_list
@@ -51,10 +37,9 @@ def run_in_chunks(tasks, drug_list, chunk_size=200, max_workers=3):
     chunks = [all_drugs[i:i+chunk_size] for i in range(0, len(all_drugs), chunk_size)]
     print(f"Чанков: {len(chunks)} × {chunk_size} препаратов")
 
-    # 2. Аккумуляторы
     acc = {name: [] for name in tasks}
-
     t0 = time.time()
+
     for ci, chunk in enumerate(chunks, 1):
         print(f"\n=== Чанк {ci}/{len(chunks)} ({len(chunk)} препаратов) ===")
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
@@ -72,15 +57,12 @@ def run_in_chunks(tasks, drug_list, chunk_size=200, max_workers=3):
                 except Exception as e:
                     print(f"  [{name:10s}] ОШИБКА: {type(e).__name__}: {e}")
 
-        # 3. Чистим память между чанками
         import gc
         gc.collect()
-
         elapsed = time.time() - t0
         eta = elapsed / ci * (len(chunks) - ci)
         print(f"  прогресс: {elapsed:.0f}s, ETA {eta:.0f}s")
 
-    # 4. Склеиваем
     results = {}
     for name, frames in acc.items():
         if frames:
@@ -91,117 +73,60 @@ def run_in_chunks(tasks, drug_list, chunk_size=200, max_workers=3):
         print(f"[{name:10s}] итого: {results[name].shape}")
     return results
 
-
-tasks = {
-    "gorzdrav":  (parser_Gorzdrav,  DRUGS_TEST),
-    "rigla":     (parser_Rigla,     DRUGS_TEST),
-    # "stolichki": (parser_Stolichki, DRUGS_TEST),
-}
-
-SCHEMAS = {
-    "gorzdrav": {
-        "rename": {
-            "Поисковый запрос": "query",
-            "Наименование": "name",
-            "Цена (лучшая)": "price",
-            "Цена без скидки": "price_regular",
-            "Производитель": "manufacturer",
-            "Действующее вещество": "active_substance",
-            "Страна": "country",
-            "Ссылка": "url",
-        },
-    },
-    "rigla": {
-        "rename": {
-            "Поисковый запрос": "query",
-            "Наименование": "name",
-            "Цена": "price",
-            "Цена без скидки": "price_regular",
-            "Цена по карте": "price_card",
-            "Производитель": "manufacturer",
-            "В наличии": "in_stock",
-            "Ссылка": "url",
-        },
-    },
-}
-
-UNIFIED_COLS = [
-    "pharmacy", "query", "name", "price",
-    "price_regular", "price_card",
-    "manufacturer", "active_substance", "country", "in_stock",
-    "url",
-]
-
-# ==========================================
-# Нормализация (приведение к формату)
-# ==========================================
 def normalize_pharmacy_data(df, pharmacy_name):
-    """
-    Приводит DataFrame к единому формату.
-    Возвращает новый DataFrame, ничего не сохраняет.
-    """
+    SCHEMAS = {
+        "gorzdrav": {
+            "rename": {
+                "Поисковый запрос": "query", "Наименование": "name",
+                "Цена (лучшая)": "price", "Цена без скидки": "price_regular",
+                "Производитель": "manufacturer", "Действующее вещество": "active_substance",
+                "Страна": "country", "Ссылка": "url",
+            },
+        },
+        "rigla": {
+            "rename": {
+                "Поисковый запрос": "query", "Наименование": "name",
+                "Цена": "price", "Цена без скидки": "price_regular",
+                "Цена по карте": "price_card", "Производитель": "manufacturer",
+                "В наличии": "in_stock", "Ссылка": "url",
+            },
+        },
+    }
+    UNIFIED_COLS = [
+        "pharmacy", "query", "name", "price", "price_regular", "price_card",
+        "manufacturer", "active_substance", "country", "in_stock", "url",
+    ]
+
     if df is None or df.empty:
         print(f"Данные для '{pharmacy_name}' пусты.")
         return pd.DataFrame(columns=UNIFIED_COLS)
 
-    # 1. Переименовываем колонки по схеме
     rename_map = SCHEMAS.get(pharmacy_name, {}).get("rename", {})
     df = df.rename(columns=rename_map).copy()
 
-    # 2. Добавляем недостающие колонки (пустыми)
     for col in UNIFIED_COLS:
         if col not in df.columns:
             df[col] = None
 
-    # 3. Добавляем название аптеки
     df["pharmacy"] = pharmacy_name
-
-    # 4. Оставляем только нужные колонки в правильном порядке
     df = df[UNIFIED_COLS]
 
-    # 5. Приводим цены к числовому типу
     for col in ["price", "price_regular", "price_card"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     return df
 
 # ==========================================
-# Сохранение - пока не используется
+# Многоступенчатый матчинг
 # ==========================================
-def save_pharmacy_data(df, pharmacy_name, output_dir, format="parquet"):
-    """
-    Сохраняет DataFrame в файл.
-    format: "parquet" или "pickle"
-    """
-    if df is None or df.empty:
-        print(f"Нечего сохранять для '{pharmacy_name}'.")
-        return None
-
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    if format == "parquet":
-        output_path = output_dir / f"{pharmacy_name}.parquet"
-        df.to_parquet(output_path, index=False)
-    elif format == "pickle":
-        output_path = output_dir / f"{pharmacy_name}.pkl"
-        df.to_pickle(output_path)
-    else:
-        raise ValueError(f"Неизвестный формат: {format}")
-
-    print(f"✅ {pharmacy_name}: {len(df)} строк сохранено в {output_path.name}")
-    return output_path
-
-
 def build_pharmacy_summary(df, pharmacy_name, drugs_list):
-    # 1. Фильтруем данные по аптеке
     pharmacy_raw = df[
         (df["pharmacy"] == pharmacy_name) & 
         (df["query"].isin(drugs_list))
     ].copy()
     
     if pharmacy_raw.empty:
-        print(f"Для аптеки '{pharmacy_name}' не найдено данных")
+        print(f"⚠️ Для аптеки '{pharmacy_name}' не найдено данных.")
         return pd.DataFrame({
             "Исходное наим товара": drugs_list,
             f"Товар {pharmacy_name.capitalize()}": None,
@@ -209,114 +134,136 @@ def build_pharmacy_summary(df, pharmacy_name, drugs_list):
             f"Ссылка {pharmacy_name.capitalize()}": None
         })
 
-    # 2. Извлекаем match_key из выдачи парсера
-    print(f"[{pharmacy_name.capitalize()}] Извлекаем match_key из выдачи...")
-    pharmacy_raw["parsed_match_key"] = pharmacy_raw["name"].apply(
-        lambda x: extractor.build_match_key(extractor.normalize_entity(extractor.extract_regex(x))) 
-        if extractor.extract_regex(x) else None
-    )
+    def get_entity_data(x):
+        e = extractor.extract_regex(x)
+        if not e:
+            return {"key": None, "brand": None, "dose": None}
+        norm = extractor.normalize_entity(e)
+        return {
+            "key": extractor.build_match_key(norm),
+            "brand": norm.get("brand_norm"),
+            "dose": norm.get("dose_norm")
+        }
 
-    # 3. Извлекаем match_key из исходного списка
+    # Считаем один раз для выдачи и для списка
+    pharm_ents = pharmacy_raw["name"].apply(get_entity_data)
+    pharmacy_raw["parsed_match_key"] = pharm_ents.apply(lambda x: x["key"])
+    pharmacy_raw["parsed_brand"] = pharm_ents.apply(lambda x: x["brand"])
+    pharmacy_raw["parsed_dose"] = pharm_ents.apply(lambda x: x["dose"])
+
     drugs_df = pd.DataFrame({"Исходное наим товара": drugs_list})
-    
-    def get_target_key(name):
-        e = extractor.extract_regex(name)
-        if e:
-            return extractor.build_match_key(extractor.normalize_entity(e))
-        return None
-        
-    drugs_df["target_match_key"] = drugs_df["Исходное наим товара"].apply(get_target_key)
+    target_ents = drugs_df["Исходное наим товара"].apply(get_entity_data)
+    drugs_df["target_match_key"] = target_ents.apply(lambda x: x["key"])
+    drugs_df["target_brand"] = target_ents.apply(lambda x: x["brand"])
+    drugs_df["target_dose"] = target_ents.apply(lambda x: x["dose"])
 
-    # 4. Сначала пробуем СТРОГОЕ совпадение
-    print(f"[{pharmacy_name.capitalize()}] Ищем строгие совпадения...")
+    # Ступень 1: Строгий
+    print(f"[{pharmacy_name.capitalize()}] Ступень 1: Строгий матчинг...")
     matched = pd.merge(
-        drugs_df,
-        pharmacy_raw,
+        drugs_df, pharmacy_raw,
         left_on=["Исходное наим товара", "target_match_key"],
         right_on=["query", "parsed_match_key"],
         how="left"
     )
 
-    # =========================================================================
-    # СПАСЕНИЕ ДЛЯ СЛОЖНЫХ СЛУЧАЕВ (Азитромицин-Вертекс, Азопт и т.д.)
-    # =========================================================================
+    # Ступень 2: Бренд + Доза
     missing_mask = matched["name"].isna()
-    
     if missing_mask.any():
-        print(f"[{pharmacy_name.capitalize()}] Спасаем {missing_mask.sum()} записей по бренду и производителю...")
+        print(f"[{pharmacy_name.capitalize()}] Ступень 2: Матчинг по бренду и дозе ({missing_mask.sum()} записей)...")
+        valid_pharm = pharmacy_raw.dropna(subset=["parsed_brand", "parsed_dose", "price"])
+        best_by_brand_dose = valid_pharm.sort_values("price").groupby(["parsed_brand", "parsed_dose"]).first().reset_index()
         
-        def rescue_by_manufacturer(row):
-            query_name = str(row["Исходное наим товара"]).lower()
-            
-            # Берем первое слово из запроса (арпефлю)
-            brand_word = query_name.split()[0]
-            # Убираем всё, кроме букв (если есть дефисы или точки)
-            brand_word = re.sub(r"[^а-яa-z]", "", brand_word)
-            
-            if not brand_word:
+        def rescue_by_brand_dose(row):
+            b, d = row["target_brand"], row["target_dose"]
+            if pd.isna(b) or pd.isna(d):
                 return pd.Series({"name": None, "price": None, "url": None})
-            
-            # Ищем в аптеке все товары, где в названии есть этот бренд
-            candidates = pharmacy_raw[
-                pharmacy_raw["name"].str.lower().str.contains(brand_word, na=False)
-            ]
-            
-            if candidates.empty:
-                return pd.Series({"name": None, "price": None, "url": None})
-            
-            # Берем самый дешевый из найденных
-            best = candidates.sort_values("price").iloc[0]
-            return pd.Series({
-                "name": best["name"],
-                "price": best["price"],
-                "url": best["url"]
-            })
+            match = best_by_brand_dose[(best_by_brand_dose["parsed_brand"] == b) & (best_by_brand_dose["parsed_dose"] == d)]
+            if not match.empty:
+                best = match.iloc[0]
+                return pd.Series({"name": best["name"], "price": best["price"], "url": best["url"]})
+            return pd.Series({"name": None, "price": None, "url": None})
 
-        # Применяем спасение
-        rescued = matched[missing_mask].apply(rescue_by_manufacturer, axis=1)
+        rescued_step2 = matched[missing_mask].apply(rescue_by_brand_dose, axis=1)
+        matched.loc[missing_mask, ["name", "price", "url"]] = rescued_step2[["name", "price", "url"]].values
+
+    # Ступень 3: Только бренд
+    missing_mask = matched["name"].isna()
+    if missing_mask.any():
+        print(f"[{pharmacy_name.capitalize()}] Ступень 3: Матчинг по бренду ({missing_mask.sum()} записей)...")
+        valid_pharm_brand = pharmacy_raw.dropna(subset=["parsed_brand", "price"])
+        best_by_brand = valid_pharm_brand.sort_values("price").groupby("parsed_brand").first().reset_index()
         
-        # Записываем спасенные данные обратно
-        matched.loc[missing_mask, "name"] = rescued["name"].values
-        matched.loc[missing_mask, "price"] = rescued["price"].values
-        matched.loc[missing_mask, "url"] = rescued["url"].values
-    # =========================================================================
+        def rescue_by_brand_only(row):
+            b = row["target_brand"]
+            if pd.isna(b):
+                return pd.Series({"name": None, "price": None, "url": None})
+            match = best_by_brand[best_by_brand["parsed_brand"] == b]
+            if not match.empty:
+                best = match.iloc[0]
+                return pd.Series({"name": best["name"], "price": best["price"], "url": best["url"]})
+            return pd.Series({"name": None, "price": None, "url": None})
 
-    # 5. Агрегация (берем минимальную цену)
+        rescued_step3 = matched[missing_mask].apply(rescue_by_brand_only, axis=1)
+        matched.loc[missing_mask, ["name", "price", "url"]] = rescued_step3[["name", "price", "url"]].values
+
+    # Ступень 4: Поиск по первому слову (ОПТИМИЗИРОВАНО)
+    missing_mask = matched["name"].isna()
+    if missing_mask.any():
+        print(f"[{pharmacy_name.capitalize()}] Ступень 4: Поиск по первому слову ({missing_mask.sum()} записей)...")
+        
+        missing_queries = matched.loc[missing_mask, "Исходное наим товара"].tolist()
+        first_words = [re.sub(r"[^а-яa-z]", "", q.lower().split()[0]) for q in missing_queries]
+        pharm_names_lower = pharmacy_raw["name"].str.lower().fillna("")
+        unique_words = set(w for w in first_words if w)
+        
+        best_items = {}
+        for word in unique_words:
+            mask = pharm_names_lower.str.contains(word, na=False)
+            candidates = pharmacy_raw[mask]
+            if not candidates.empty:
+                best_items[word] = candidates.sort_values("price").iloc[0]
+
+        for idx in matched[missing_mask].index:
+            query = matched.loc[idx, "Исходное наим товара"]
+            word = re.sub(r"[^а-яa-z]", "", query.lower().split()[0])
+            if word in best_items:
+                best = best_items[word]
+                matched.loc[idx, "name"] = best["name"]
+                matched.loc[idx, "price"] = best["price"]
+                matched.loc[idx, "url"] = best["url"]
+
+    # Финальная агрегация
     matched_data = (
         matched
-        .sort_values("price")
         .groupby("Исходное наим товара")
-        .agg({
-            "name": "first",
-            "price": "first",
-            "url": "first"
-        })
+        .agg({"name": "first", "price": "first", "url": "first"})
         .reset_index()
     )
 
-    # 6. Привязка к исходному порядку
     matched_data = pd.merge(
         pd.DataFrame({"Исходное наим товара": drugs_list}),
-        matched_data,
-        on="Исходное наим товара",
-        how="left"
+        matched_data, on="Исходное наим товара", how="left"
     )
 
-    # 7. Красивые названия колонок
     cap_name = pharmacy_name.capitalize()
-    matched_data.columns = [
-        "Исходное наим товара", 
-        f"Товар {cap_name}", 
-        f"Цена {cap_name}", 
-        f"Ссылка {cap_name}"
-    ]
+    matched_data.columns = ["Исходное наим товара", f"Товар {cap_name}", f"Цена {cap_name}", f"Ссылка {cap_name}"]
+
+    found = matched_data[f"Товар {cap_name}"].notna().sum()
+    print(f"✅ [{cap_name}] Найдено: {found} из {len(drugs_list)} ({found/len(drugs_list):.1%})")
 
     return matched_data
-    
+
+# ==========================================
+# Запуск парсинга и сборка
+# ==========================================
+tasks = {
+    "gorzdrav":  (parser_Gorzdrav,  drugs),
+    "rigla":     (parser_Rigla,     drugs),
+}
+
 results = run_in_chunks(tasks, drugs, chunk_size=200, max_workers=3)
 data_Gorzdrav  = results.get("gorzdrav")
 data_Rigla     = results.get("rigla")
-#data_Stolichki = results.get("stolichki")
 
 normalized_data_Rigla = normalize_pharmacy_data(data_Rigla,"rigla")
 normalized_data_Gorzdrav = normalize_pharmacy_data(data_Gorzdrav,"gorzdrav")
@@ -324,9 +271,12 @@ normalized_data_Gorzdrav = normalize_pharmacy_data(data_Gorzdrav,"gorzdrav")
 matched_Rigla = build_pharmacy_summary(normalized_data_Rigla, "rigla", drugs)
 matched_Gorzdrav = build_pharmacy_summary(normalized_data_Gorzdrav, "gorzdrav", drugs)
 
+# ==========================================
+# Запись в базу данных
+# ==========================================
 DB_URL = os.environ.get("DB_URL")
 if DB_URL:
-    print("Подключение к базе данных...")
+    print("\nПодключение к базе данных...")
     engine = create_engine(DB_URL)
     today = date.today()
     
@@ -334,18 +284,16 @@ if DB_URL:
         if df.empty:
             return
             
-        # Переименовываем колонки DataFrame под новые имена в базе
         df_export = pd.DataFrame({
             "date": today,
             "query": df["Исходное наим товара"],
-            "product_name": df.iloc[:, 1],  # Вторая колонка (Товар Ригла/Горздрав)
-            "price": df.iloc[:, 2],         # Третья колонка (Цена)
-            "url": df.iloc[:, 3]            # Четвертая колонка (Ссылка)
+            "product_name": df.iloc[:, 1],
+            "price": df.iloc[:, 2],
+            "url": df.iloc[:, 3]
         })
-        # УБИРАЕМ ДУБЛИКАТЫ ПЕРЕД ВСТАВКОЙ
+        # Защита от дублей (CardinalityViolation)
         df_export = df_export.drop_duplicates(subset=["date", "query"], keep="first")
         
-        # Теперь UPSERT становится элементарным
         upsert_query = text(f"""
             INSERT INTO {table_name} (date, query, product_name, price, url)
             SELECT date, query, product_name, price, url
@@ -362,13 +310,11 @@ if DB_URL:
             conn.execute(upsert_query)
             conn.execute(text("DROP TABLE temp_table;"))
 
-    # 1. Сохраняем Риглу
     save_to_db(matched_Rigla, "price_rigla")
-    print("Ригла записана в базу.")
+    print("✅ Ригла записана в базу.")
 
-    # 2. Сохраняем Горздрав
     save_to_db(matched_Gorzdrav, "price_gorzdrav")
-    print("Горздрав записан в базу.")
+    print("✅ Горздрав записан в базу.")
 
 else:
-    print("Переменная DB_URL не найдена.")
+    print("⚠️ Переменная DB_URL не найдена.")

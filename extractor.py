@@ -76,7 +76,8 @@ PACK_UNITS = ["шт", "таб", "капс", "амп", "доз", "фл", "пак"
 ALLOWED_FORMS = {
     "tab", "caps", "solution", "spray", "cream", "ointment", "drops",
     "supp", "syrup", "powder", "gel", "patch", "dragee", "herbal",
-    "tincture", "extract", "other","ampoules",
+    "tincture", "extract", "other","ampoules","rhizomes",
+    "juice"
 }
 
 # ===========================================================================

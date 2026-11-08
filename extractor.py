@@ -177,9 +177,9 @@ def extract_regex(name: str) -> Optional[dict]:
 
     # Ищем ВСЕ совпадения "мл" и берем ПОСЛЕДНЕЕ (объем ампулы, а не концентрацию)
     volume_ml = None
-    volumes = _VOLUME_RE.findall(s)
+    volumes = list(_VOLUME_RE.finditer(s))
     if volumes:
-        volume_ml = _parse_float(volumes[-1])
+        volume_ml = _parse_float(volumes[-1].group(1))
 
     name_lower = name.lower().replace("ё", "е")
     form_raw_lower = form_raw.lower().replace("ё", "е")
